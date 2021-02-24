@@ -1,0 +1,158 @@
+---
+title: "Lab 6 Rasters"
+author: "Kelsie Fronheiser"
+date: "2/23/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(raster)
+library(tidyverse)
+library(here)
+library(sf)
+library(fasterize)
+```
+
+#The Data
+
+```{r}
+knitr::include_graphics('img/landsat.png')
+```
+
+We are working with visible bands 1-3 & near-infrared 4
+
+## Load & inscpect data
+
+```{r}
+landsat <- here('data/Landsat7.tif')
+
+ls_1 <- raster(landsat)
+ls_1
+
+# but the crs is NA - why?
+```
+
+```{r}
+plot(ls_1)
+```
+
+```{r}
+ls_2 <-raster(landsat, band = 2)
+ls_3 <-raster(landsat, band = 3)
+ls_4 <-raster(landsat, band = 4)
+
+# Another way to do this:
+ls_stack <-raster::stack(landsat)
+ls_stack
+  
+```
+
+## Prepare data
+```{r}
+ls_11 <- raster::aggregate(ls_1, fact = 3, fun = mean)
+ls_22 <- raster::aggregate(ls_2, fact = 3, fun = mean)
+ls_33 <- raster::aggregate(ls_3, fact = 3, fun = mean)
+ls_44 <- raster::aggregate(ls_4, fact = 3, fun = mean)
+
+```
+
+```{r}
+plot(ls_11, col = hcl.colors(n =100, palette = 'Blues 2'))
+plot(ls_22, col = hcl.colors(n =100, palette = 'Greens 2'))
+plot(ls_33, col = hcl.colors(n =100, palette = 'Reds 2'))
+plot(ls_44, col = hcl.colors(n =100, palette = 'Reds 2'))
+```
+Below we are masking to the extent of the land (no ocean)
+```{r}
+sbc_rast <- raster(here('data/county.tif'))
+plot(sbc_rast)
+plot(ls_33)
+mask(ls_33, sbc_rast) %>% plot()
+
+
+ls_333 <- mask(ls_33, sbc_rast)
+ls_444 <- mask(ls_44, sbc_rast)
+
+plot(ls_333)
+```
+
+## Raster Algebra
+```{r}
+vec1 <- 1:5
+vec1
+vec1 * 2
+vec1 ^2
+
+ls_333
+ls_333 * 2
+log(ls_333)
+plot(ls_333); plot(log(ls_333))
+```
+
+```{r}
+vec2 <- 6:10
+vec1 + vec2
+
+ls_333 + ls_444
+```
+
+## 'raster::calc()'
+```{r}
+ls_stack <- stack(ls_11, ls_22, ls_333, ls_444)
+
+ls_stack
+
+ls_mean <- raster::calc(ls_stack, fun = mean, na.rm = FALSE)
+
+#The na.rm = FALSE takes care of the ocean in the other layers - it becomes an NA and is not shown
+
+plot(ls_mean)
+```
+
+# Analysis
+
+## NDVI
+
+```{r}
+knitr::include_graphics('img/spectrum.png')
+
+knitr::include_graphics('img/ir_photo.jpg')
+```
+
+$$NDVI = \frac{NIR - Red}{NIR + Red}$$
+Threshold is usually .3 & above to classify as vegetation
+```{r}
+ndvi <- (ls_444 - ls_333) / (ls_444 + ls_333)
+
+plot(ndvi, col = hcl.colors(100, 'Grays'))
+
+is_forest <- function(x, thresh = .3) {
+  y <- ifelse(x >= thresh, 1, NA)
+  return(y)
+}
+# this is saying that areas above .3 are shown as 1 (veg) and the rest is shown as NA
+
+forest <- calc(ndvi, fun = is_forest)
+plot(forest, col = 'green')
+```
+
+## ggplot & rasters
+```{r}
+ndvi_df <- raster::rasterToPoints(ndvi) %>% 
+  as.data.frame()
+
+# column layer is ndvi values at each cell
+
+forest_df <- raster::rasterToPoints(forest) %>% 
+  as.data.frame()
+ggplot(data = ndvi_df, aes(x = x, y = y, fill = layer)) +
+  geom_raster() +
+  geom_raster(data = forest_df, fill = 'green') +
+  coord_sf(expand = 0) +
+  scale_fill_gradient(low = 'black', high = 'white') +
+  theme_void() +
+  theme(panel.background = element_rect(fill = 'slateblue4'))
+```
+
